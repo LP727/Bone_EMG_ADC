@@ -1,0 +1,10 @@
+# Executable #
+bone_emg_adc
+
+# Compiled sources #
+*.o
+
+# Undesired extensions #
+*.csv
+*.vscode
+*.txt
