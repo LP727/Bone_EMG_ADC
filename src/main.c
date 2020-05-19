@@ -69,6 +69,5 @@ int main(int argc, char **argv)
 
     //TODO: write driver config
 
-    printf("\nHello BBGW world!\n");
     return EXIT_SUCCESS;
 }
