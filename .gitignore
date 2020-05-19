@@ -8,3 +8,6 @@ bone_emg_adc
 *.csv
 *.vscode
 *.txt
+
+# Lib pruio examples #
+examples/
