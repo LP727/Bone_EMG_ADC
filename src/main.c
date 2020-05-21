@@ -8,6 +8,11 @@
  *               It should be compiled on the BBGW or a computer with the appropriate libraries setup on it
  *
  *********************************************************************************************************/
+/////////////////////////////////////////////////
+/// ... DEBUG define ...
+/////////////////////////////////////////////////
+
+      
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,7 +21,12 @@
 #include <time.h>
 #include <string.h>
 
-#include "libpruio/pruio.h"
+//!< If 1, activates stub for functions relying on Pruio
+#define LOCAL_COMP 0
+
+#if (LOCAL_COMP < 1)
+    #include "libpruio/pruio.h"
+#endif
 
 //TODO: Add error codes in an enum and in function returns
 
@@ -25,6 +35,33 @@
 #define SEC_IN_BUF  4           //!< Number of seconds of acquisition in buffer
 #define NANO_IN_SEC 1000000000  //!< Number of nanoseconds in a second
 #define BUFFER_SIZE SEC_IN_BUF * ACQ_RATE_HZ
+
+/////////////////////////////////////////////////
+/// ... Stub ...
+/////////////////////////////////////////////////
+#if (LOCAL_COMP > 0)
+
+#define PRUIO_DEF_ACTIVE 1
+//!< Stubs to allow compiling without the Beaglebone
+//!< VERY IMPORTANT: MUST NOT BE ACTIVE WHEN RUNNING ON BEAGLEBONE
+typedef struct ADC_s_
+{
+    uint16_t *Value;
+}ADC_s;
+typedef struct pruIos
+{
+    uint32_t    ESize;
+    char        *Errr;
+    uint32_t    DRam[10];
+    ADC_s       *Adc;
+} pruIo;
+
+pruIo*   pruio_new(uint32_t foo, uint32_t bar, uint32_t baz, uint32_t qux){pruIo *i = 0; return i;}
+uint32_t pruio_adc_setStep(pruIo *foo, uint32_t bar, uint32_t baz, uint32_t qux, uint32_t quux, uint32_t corge){return EXIT_SUCCESS;}
+uint32_t pruio_config(pruIo *foo, uint32_t bar, uint32_t baz, uint32_t qux, uint32_t quux){return EXIT_SUCCESS;}
+uint32_t pruio_rb_start(pruIo *foo){return EXIT_SUCCESS;}
+uint32_t pruio_destroy(pruIo *foo){return EXIT_SUCCESS;}
+#endif
 
 struct adc_s
 {
@@ -56,15 +93,15 @@ static struct adc_s aAdc; //!< Move buffer in there eventually
 
 int main(int argc, char **argv)
 {
-    if(ADC_init(PROBE_NB)){
+    if(ADC_init(&aAdc, PROBE_NB)){
         printf("ADC init failed\n");
         return EXIT_FAILURE;
     }
 
     
-    ADC_display();
+    ADC_display(&aAdc);
 
-    ADC_destroy();
+    ADC_destroy(&aAdc);
 
     return EXIT_SUCCESS;
 }
@@ -80,29 +117,28 @@ uint32_t ADC_init(struct adc_s *actAdc, uint32_t chanNum)
     /// ... PRU ADC Config variables ...
     /////////////////////////////////////////////////
     //!< Currently going for a 1hHz acquisition, with 8 seconds of data in buffer
-    actADC->tSamp = ACQ_RATE_HZ;    //!< The number of samples in memory
-    actADC->sRate = NANO_IN_SEC / ACQ_RATE_HZ;   //!< The sampling rate in ns (1000000 -> 1 kHz).
+    actAdc->tSamp = ACQ_RATE_HZ;    //!< The number of samples in memory
+    actAdc->sRate = NANO_IN_SEC / ACQ_RATE_HZ;   //!< The sampling rate in ns (1000000 -> 1 kHz).
     //!< To keep in mind: Default maximum memory of the Eram is 256 kByte attributed by kernel and each sample is 2Bytes
     //!< Keep in mind augmenting the number of Probes will augment memory usage
-    actADC->aChan = chanNum;             //!< NOTE: might pu 
-    actADC->mask = 0;                     //!< The active steps (9 to 11).
-    actADC->tInd = actADC->tSamp * actADC->aChan;     //!< The maximum total index.
-    actADC->half = ((io->ESize >> 2) / actADC->aChan) * actADC->aChan; //!< The maximum index of the half ring buffer.
-    actADC->samp = (actADC->half << 1) / actADC->aChan; //!< The number of samples (per step).
+    actAdc->aChan = chanNum;              //!< Number of active ADC channels
+    actAdc->mask = 0;                     //!< The active steps (9 to 11).
+    actAdc->tInd = actAdc->tSamp * actAdc->aChan;     //!< The maximum total index.
+
 
     /////////////////////////////////////////////////
     /// ... Initialization ...
     /////////////////////////////////////////////////
-    actADC->io = pruio_new(PRUIO_DEF_ACTIVE, 0, 0, 0); //!< create new driver
-    if (actADC->io->Errr){
-               printf("Failed creating io with error: (%s)\n", actADC->io->Errr);
+    actAdc->io = pruio_new(PRUIO_DEF_ACTIVE, 0, 0, 0); //!< create new driver
+    if (actAdc->io->Errr){
+               printf("Failed creating io with error: (%s)\n", actAdc->io->Errr);
                return EXIT_FAILURE;
     }
     
     /////////////////////////////////////////////////
     /// ... Step config ...
     /////////////////////////////////////////////////
-    for(i = 0; i < actADC->aChan; i++)
+    for(i = 0; i < actAdc->aChan; i++)
     {
         //!< NOTE: This dynamicall allocation is un-ideal and should be replace with Maccros
         uint32_t firstStep = 1; //!< The first step is step 1 as step 0 is charging step (see ARM doc)
@@ -111,40 +147,42 @@ uint32_t ADC_init(struct adc_s *actAdc, uint32_t chanNum)
         uint32_t SDelay = 0;    //!< No sampling delay for now
         uint32_t ODelay = 0;    //!< No open delay for now
         
-        pruio_adc_setStep(actADC->io, firstStep+i, firstChan+i, Averaging, SDelay, ODelay)//!< Initiates number of steps accodring to numbe rof probes
-        if (actADC->io->Errr){ 
-            printf("Step %d configuration failed: (%s)\n", firstStep, actADC->io->Errr); 
+        pruio_adc_setStep(actAdc->io, firstStep+i, firstChan+i, Averaging, SDelay, ODelay);//!< Initiates number of steps accodring to numbe rof probes
+        if(actAdc->io->Errr){ 
+            printf("Step %d configuration failed: (%s)\n", firstStep, actAdc->io->Errr); 
             return EXIT_FAILURE;
         }
     }
     
+    actAdc->half = ((actAdc->io->ESize >> 2) / actAdc->aChan) * actAdc->aChan; //!< The maximum index of the half ring buffer.
+    actAdc->samp = (actAdc->half << 1) / actAdc->aChan; //!< The number of samples (per step).
     /////////////////////////////////////////////////
     /// ... Driver config ...
     /////////////////////////////////////////////////
-    for(i = 0; i < actADC->aChan; i++)
+    for(i = 0; i < actAdc->aChan; i++)
     {
-        actADC->mask |= (1 << i); //!< Sets all bits corresponding to active channels
+        actAdc->mask |= (1 << i); //!< Sets all bits corresponding to active channels
     }
-    if (actADC->half > actADC->tInd){ 
-        actADC->half = actADC->tInd;
-        actADC->samp = (actADC->half << 1) / actADC->aChan;  //!< Adapt size of the half to the buffer size
+    if (actAdc->half > actAdc->tInd){ 
+        actAdc->half = actAdc->tInd;
+        actAdc->samp = (actAdc->half << 1) / actAdc->aChan;  //!< Adapt size of the half to the buffer size
     }
     else{
         printf("Number of sample exceeds half of buffer size, time to increase Eram size!\n");
         return EXIT_FAILURE;
     }
 
-    if (pruio_config(actADC->io, actADC->samp, actADC->mask, actADC->sRate, 0)){
-        printf("Config failed (%s)\n", io->Errr); //!< Configures the driver
+    if (pruio_config(actAdc->io, actAdc->samp, actAdc->mask, actAdc->sRate, 0)){
+        printf("Config failed (%s)\n", actAdc->io->Errr); //!< Configures the driver
         return EXIT_FAILURE;
     }
 
-    if (pruio_rb_start(actADC->io)){
-        printf("RB_start failed (%s)\n", actADC->io->Errr); 
+    if (pruio_rb_start(actAdc->io)){
+        printf("RB_start failed (%s)\n", actAdc->io->Errr); 
         return EXIT_FAILURE;
     }
-    actADC->pStart = actADC->io->Adc->Value;//!< Pointer to the start of the ring buffer.
-    actADC->pMid = actADC->pStart + actADC->half;       //!< Pointer to the middle of the ring buffer.
+    actAdc->pStart = actAdc->io->Adc->Value;//!< Pointer to the start of the ring buffer.
+    actAdc->pMid = actAdc->pStart + actAdc->half;       //!< Pointer to the middle of the ring buffer.
 
     return EXIT_SUCCESS;
 }
@@ -176,13 +214,14 @@ uint32_t ADC_display(struct adc_s *actAdc)
     uint32_t secInd = 0;
     uint32_t dispInd = 0;
     uint32_t i;
+    uint32_t j = 0;
     struct timespec mSec;
     mSec.tv_nsec = 1000000;
 
     printf("Starting dislay:\n");
-    if(actADC->aChan == 1)//!< Currently only supports single channel
+    if(actAdc->aChan == 1)//!< Currently only supports single channel
     {
-        while(1)//TODO: Add stop condition
+        while(j < 30)//!< Stops after 30 seconds TODO: Add proper stop condition
         {
             //!< Very rudimentary display of 4 last second of ADC acquisition
             printf("\r");
@@ -197,18 +236,19 @@ uint32_t ADC_display(struct adc_s *actAdc)
             }
 
             //!< Fetch new ADC data
-            if(actADC->pStart > actADC->pMid){
-                while(actADC->io->DRam[0] < half) nanosleep(&mSec, NULL);
+            if(actAdc->pStart > actAdc->pMid){
+                while(actAdc->io->DRam[0] < actAdc->half) nanosleep(&mSec, NULL);
             }
             else{
-                while(actADC->io->DRam[0] > half) nanosleep(&mSec, NULL);
+                while(actAdc->io->DRam[0] > actAdc->half) nanosleep(&mSec, NULL);
             }
-            memcpy(*ADC_buffer[(secInd*ACQ_RATE_HZ)],pStart,ACQ_RATE_HZ); //!< Since copy is made once per second, uses acquisition rate
+            memcpy(&ADC_buffer[(secInd*ACQ_RATE_HZ)],actAdc->pStart,ACQ_RATE_HZ); //!< Since copy is made once per second, uses acquisition rate
 
 
 
-            swap(actADC->pStart,actADC->pMid);
-            secInd = (secInd++) % SEC_IN_BUF;
+            swap(actAdc->pStart,actAdc->pMid);
+            secInd = (secInd+1) % SEC_IN_BUF;
+            j++;
         }
     }
     else
@@ -220,9 +260,9 @@ uint32_t ADC_display(struct adc_s *actAdc)
     return EXIT_SUCCESS;
 }
 
-ADC_destroy(struct adc_s *actAdc)
+void ADC_destroy(struct adc_s *actAdc)
 {
-    pruio_destroy(actADC->io); //!< Destroys driver before exit
+    pruio_destroy(actAdc->io); //!< Destroys driver before exit
 }
 
 static void swap(uint16_t *p0, uint16_t *p1)
