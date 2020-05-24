@@ -34,7 +34,7 @@
 #define ACQ_RATE_HZ 1000        //!< ADC acquisition rate in Hz
 #define SEC_IN_BUF  4           //!< Number of seconds of acquisition in buffer
 #define NANO_IN_SEC 1000000000  //!< Number of nanoseconds in a second
-#define BUFFER_SIZE SEC_IN_BUF * ACQ_RATE_HZ
+#define BUFFER_SIZE (SEC_IN_BUF * ACQ_RATE_HZ)
 
 /////////////////////////////////////////////////
 /// ... Stub ...
@@ -85,7 +85,7 @@ uint32_t ADC_display(struct adc_s *actAdc);
 void ADC_destroy(struct adc_s *actAdc);
 
 //!< Future local functions
-static void swap(uint16_t *p0, uint16_t *p1);
+static void swap(uint16_t **p0, uint16_t **p1);
 
 
 uint16_t ADC_buffer[BUFFER_SIZE] = {0};//!< Future public buffer, will need semaphore or mutex to monitor access
@@ -161,7 +161,7 @@ uint32_t ADC_init(struct adc_s *actAdc, uint32_t chanNum)
     /////////////////////////////////////////////////
     for(i = 0; i < actAdc->aChan; i++)
     {
-        actAdc->mask |= (1 << i); //!< Sets all bits corresponding to active channels
+        actAdc->mask |= (1 << (i+1)); //!< Sets all bits corresponding to active channels
     }
     if (actAdc->half > actAdc->tInd){ 
         actAdc->half = actAdc->tInd;
@@ -212,7 +212,7 @@ uint32_t ADC_display(struct adc_s *actAdc)
     //!< the ADC driver and stores and displays them in
     //!< a target rate of 10 updates for seconds.
     uint32_t secInd = 0;
-    uint32_t dispInd = 0;
+    int32_t dispInd = 0;
     uint32_t i;
     uint32_t j = 0;
     struct timespec mSec;
@@ -221,20 +221,8 @@ uint32_t ADC_display(struct adc_s *actAdc)
     printf("Starting dislay:\n");
     if(actAdc->aChan == 1)//!< Currently only supports single channel
     {
-        while(j < 30)//!< Stops after 30 seconds TODO: Add proper stop condition
+        while(j < 10)//!< Stops after 10 seconds TODO: Add proper stop condition
         {
-            //!< Very rudimentary display of 4 last second of ADC acquisition
-            printf("\r");
-            for(i = BUFFER_SIZE/100; i > 0; i--)//!< Replace hardcoded value
-            {
-                dispInd = (i * 100) - 1;
-                dispInd = dispInd - (secInd * 100);
-                if(dispInd < 0){
-                    dispInd += BUFFER_SIZE; //!< There is probably a better way to do this with a modulo but the clock is ticking
-                }
-                printf("%d",ADC_buffer[dispInd]); //!< adjust index to move the display as new data comes in
-            }
-
             //!< Fetch new ADC data
             if(actAdc->pStart > actAdc->pMid){
                 while(actAdc->io->DRam[0] < actAdc->half) nanosleep(&mSec, NULL);
@@ -242,11 +230,18 @@ uint32_t ADC_display(struct adc_s *actAdc)
             else{
                 while(actAdc->io->DRam[0] > actAdc->half) nanosleep(&mSec, NULL);
             }
-            memcpy(&ADC_buffer[(secInd*ACQ_RATE_HZ)],actAdc->pStart,ACQ_RATE_HZ); //!< Since copy is made once per second, uses acquisition rate
+            memcpy(&ADC_buffer[(secInd * ACQ_RATE_HZ)], actAdc->pStart, ACQ_RATE_HZ*2); //!< Since copy is made once per second, uses acquisition rate
 
-
-
-            swap(actAdc->pStart,actAdc->pMid);
+            //!< Very rudimentary display of 4 last second of ADC acquisition
+            printf("\r");
+            for(i = 0; i < BUFFER_SIZE/100; i++)//!< Replace hardcoded value
+            {
+                dispInd = (i * 100);
+                dispInd = (dispInd + (((secInd+1) % SEC_IN_BUF) * ACQ_RATE_HZ)) % BUFFER_SIZE;
+                printf("%d",ADC_buffer[dispInd]); //!< adjust index to move the display as new data comes in
+            }
+            fflush(stdout);
+            swap(&actAdc->pStart,&actAdc->pMid);
             secInd = (secInd+1) % SEC_IN_BUF;
             j++;
         }
@@ -256,7 +251,7 @@ uint32_t ADC_display(struct adc_s *actAdc)
         return EXIT_FAILURE;
     }
     
-
+    printf("\n");
     return EXIT_SUCCESS;
 }
 
@@ -265,9 +260,9 @@ void ADC_destroy(struct adc_s *actAdc)
     pruio_destroy(actAdc->io); //!< Destroys driver before exit
 }
 
-static void swap(uint16_t *p0, uint16_t *p1)
+static void swap(uint16_t **p0, uint16_t **p1)
 {
-    uint16_t *swap = p0;
-    p0 = p1;
-    p1 = swap;
+    uint16_t *swap = *p0;
+    *p0 = *p1;
+    *p1 = swap;
 }
