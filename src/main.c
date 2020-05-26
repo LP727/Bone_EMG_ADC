@@ -35,7 +35,7 @@
 #define SEC_IN_BUF  4           //!< Number of seconds of acquisition in buffer
 #define NANO_IN_SEC 1000000000  //!< Number of nanoseconds in a second
 #define BUFFER_SIZE (SEC_IN_BUF * ACQ_RATE_HZ)
-#define ADC_TO_MV   36          //!< Convertion factor to go from adc (16bits) to ref voltage (1800mV)
+#define ADC_TO_MV   2.275       //!< Convertion factor to go from adc (12bits) to ref voltage (1800mV)
 
 /////////////////////////////////////////////////
 /// ... Stub ...
@@ -238,7 +238,7 @@ uint32_t ADC_display(struct adc_s *actAdc)
             {
                 dispInd = (i * 100);
                 dispInd = (dispInd + (((secInd+1) % SEC_IN_BUF) * ACQ_RATE_HZ)) % BUFFER_SIZE;
-                printf("%d",ADC_buffer[dispInd]/ADC_TO_MV); //!< adjust index to move the display as new data comes in
+                printf("%4.0f|",ADC_buffer[dispInd]/ADC_TO_MV); //!< adjust index to move the display as new data comes in
             }
             fflush(stdout);
             swap(&actAdc->pStart,&actAdc->pMid);
