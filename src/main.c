@@ -282,7 +282,8 @@ uint32_t ADC_acquisition(void *arg)
             sem_post(&actAdc->adcSem);
             swap(&actAdc->pStart,&actAdc->pMid);
             secInd = (secInd+1) % SEC_IN_BUF;
-            //!< Check for stop condition on every end of loop
+	    
+	    //!< Check for stop condition on every end of loop
             if(!pthread_mutex_trylock(&actAdc->stpMtx)){
                 if(actAdc->adcStp == 1){
                     run = 0;
@@ -337,7 +338,6 @@ uint32_t ADC_display(struct adc_s *actAdc, uint32_t dispRate)
                 {
                     dispInd = ((i+j) * 100);
                     dispInd = (dispInd + (((secInd) % SEC_IN_BUF) * ACQ_RATE_HZ)) % BUFFER_SIZE;
-                    //printf("%d:",dispInd);
 		    printf("%4.0f:",ADC_buffer[dispInd]/ADC_TO_MV); //!< adjust index to move the display as new data comes in
                 }
 		fflush(stdout);

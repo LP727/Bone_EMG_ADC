@@ -11,7 +11,7 @@ SRC := $(wildcard $(SRC_DIR)/*.c)
 OBJ := $(SRC:$(SRC_DIR)/%.cpp=$(OBJ_DIR)/%.o)
 
 CC :=gcc
-CFLAGS := -Wall -lpruio -pthread -I$(INC_DIR)
+CFLAGS := -O3 -Wall -lpruio -pthread -I$(INC_DIR)
 
 .PHONY: all run clean
 
