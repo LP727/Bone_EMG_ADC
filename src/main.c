@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <semaphore.h>
 #include <stdint.h>
 #include <time.h>
 #include <string.h>
@@ -35,7 +36,8 @@
 #define SEC_IN_BUF  4           //!< Number of seconds of acquisition in buffer
 #define NANO_IN_SEC 1000000000  //!< Number of nanoseconds in a second
 #define BUFFER_SIZE (SEC_IN_BUF * ACQ_RATE_HZ)
-#define ADC_TO_MV   2.275       //!< Convertion factor to go from adc (12bits) to ref voltage (1800mV)
+#define ADC_TO_MV   2.275       //!< Convertion factor to go from adc (16bits) to ref voltage (1800mV)
+#define DISPLAY_RESOLUTION 10   //!< Refresh of display
 
 /////////////////////////////////////////////////
 /// ... Stub ...
@@ -66,27 +68,36 @@ uint32_t pruio_destroy(pruIo *foo){return EXIT_SUCCESS;}
 
 struct adc_s
 {
-    pruIo *io;      //!< The driver
-    uint32_t aChan; //!< The numbe rof active channels
-    uint32_t tSamp; //!< The number of samples in memory
-    uint32_t sRate; //!< The sampling rate in ns (1000000 -> 1 kHz).
-    uint32_t mask;  //!< The active steps (9 to 11).
-    uint32_t tInd;  //!< The maximum total index.
-    uint32_t half;  //!< The maximum index of the half ring buffer.
-    uint32_t samp;  //!< The number of samples (per step).
-    uint16_t *pStart;//!< Pointer to the start of the ring buffer.
-    uint16_t *pMid;  //!< Pointer to the middle of the ring buffer.
+    pruIo *io;          //!< The driver
+    
+    uint32_t aChan;     //!< The numbe rof active channels
+    uint32_t tSamp;     //!< The number of samples in memory
+    uint32_t sRate;     //!< The sampling rate in ns (1000000 -> 1 kHz).
+    uint32_t mask;      //!< The active steps (9 to 11).
+    uint32_t tInd;      //!< The maximum total index.
+    uint32_t half;      //!< The maximum index of the half ring buffer.
+    uint32_t samp;      //!< The number of samples (per step).
+    uint16_t *pStart;   //!< Pointer to the start of the ring buffer.
+    uint16_t *pMid;     //!< Pointer to the middle of the ring buffer.
+
+    pthread_t adcThread;    //!< ADC background thread
+    pthread_mutex_t bufMtx; //!< mutex for buffer access
+    pthread_mutex_t stpMtx; //!< mutex for stop of adcThread
+    sem_t adcSem;           //!< semaphore to syncrhonise end of acquisition with display
+    uint32_t adcStp;        //!< value to send stop signal 
 };
 
-//!< Future public functions
+//!< Future pu, uint32_t dispRateblic functions
 uint32_t ADC_init(struct adc_s *actAdc, uint32_t chanNum);
 uint32_t ADC_acquisition_start(struct adc_s *actAdc);
-uint32_t ADC_display(struct adc_s *actAdc);
+uint32_t ADC_acquisition_stop(struct adc_s *actAdc);
+uint32_t ADC_display(struct adc_s *actAdc, uint32_t dispRate);
 
 void ADC_destroy(struct adc_s *actAdc);
 
 //!< Future local functions
 static void swap(uint16_t **p0, uint16_t **p1);
+static uint32_t ADC_acquisition(void *arg);
 
 
 uint16_t ADC_buffer[BUFFER_SIZE] = {0};//!< Future public buffer, will need semaphore or mutex to monitor access
@@ -99,8 +110,11 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    
-    ADC_display(&aAdc);
+    ADC_acquisition_start(&aAdc);
+
+    ADC_display(&aAdc, DISPLAY_RESOLUTION);
+
+    ADC_acquisition_stop(&aAdc);
 
     ADC_destroy(&aAdc);
 
@@ -131,6 +145,8 @@ uint32_t ADC_init(struct adc_s *actAdc, uint32_t chanNum)
     /// ... Initialization ...
     /////////////////////////////////////////////////
     actAdc->io = pruio_new(PRUIO_DEF_ACTIVE, 0, 0, 0); //!< create new driver
+    actAdc->adcStp = 0;
+    sem_init(&actAdc->adcSem, 0, 0);
     if (actAdc->io->Errr){
                printf("Failed creating io with error: (%s)\n", actAdc->io->Errr);
                return EXIT_FAILURE;
@@ -190,38 +206,64 @@ uint32_t ADC_init(struct adc_s *actAdc, uint32_t chanNum)
 
 uint32_t ADC_acquisition_start(struct adc_s *actAdc)
 {
-    //TODO: Include code to run ADC buffering in separate thread
-    //      Will require pthread and mutex
+    int iRet;
+    iRet = pthread_mutex_init(&actAdc->bufMtx,NULL);
+    if(iRet){
+        printf("Buffer mutex init failed with error %d\n", iRet);
+        return EXIT_FAILURE;
+    }
+    iRet = pthread_mutex_init(&actAdc->stpMtx,NULL);
+    if(iRet){
+        printf("Stop mutex init failed with error %d\n", iRet);
+        return EXIT_FAILURE;
+    }
+    iRet = pthread_create(&actAdc->adcThread, NULL, (void*) &ADC_acquisition, (void *)actAdc);
+    if(iRet){
+        printf("ADC thread creation failed with error %d\n", iRet);
+        return EXIT_FAILURE;
+    }
+
     return EXIT_SUCCESS;
 }
 
-//! ADC_display: displays the last x seconds of ADC acquisition for a single channel
+uint32_t ADC_acquisition_stop(struct adc_s *actAdc)
+{
+    int iRet;
+
+    iRet = pthread_mutex_lock(&actAdc->stpMtx);
+    if(iRet){
+        printf("Failed to lock stop mutex with error %d\n", iRet);
+        return EXIT_FAILURE;
+    }
+    else{
+        actAdc->adcStp = 1;
+        pthread_mutex_unlock(&actAdc->stpMtx);
+    }
+    
+    return EXIT_SUCCESS;
+}
+
+//! ADC_acquisition: stores ADC acquisition in the ADC buffer
 /*!
   Brief: 
-    This function is used to display the ADC acquisition while it is running in
-    RB mode (round buffer). Currently only supports a single step acquisition
-  param io:         pruIo *,    pre-initialized pruIo driver
-  param pStart:     uint16_t *, pointer to the start of the ADC circular buffer
-  param pMid:       uint16_t *, pointer to the middle of the ADC circular buffer
-  param chanNum:    uint32_t,   number of active ADC channels 
+    This function is used to store the ADC acquisition of the last SEC_IN_BUF
+    seconds of ADC acquisition. It is meant to be run in a background thread as
+    it contains an infitine loop. The ADC must be initialized in a RB mode for this
+    to work properly
+  param io:         struct adc_s *,    pre-initialized ADC struct holding pruio driver
   return: uint32_t, error code
 */
-uint32_t ADC_display(struct adc_s *actAdc)
+uint32_t ADC_acquisition(void *arg)
 {
-    //!< This function retrieves the latest x samples from
-    //!< the ADC driver and stores and displays them in
-    //!< a target rate of 10 updates for seconds.
     uint32_t secInd = 0;
-    int32_t dispInd = 0;
-    uint32_t i;
-    uint32_t j = 0;
+    uint32_t run = 1;
+    struct adc_s * actAdc = (struct adc_s *)arg;
     struct timespec mSec;
     mSec.tv_nsec = 1000000;
 
-    printf("Starting dislay:\n");
     if(actAdc->aChan == 1)//!< Currently only supports single channel
     {
-        while(j < 10)//!< Stops after 10 seconds TODO: Add proper stop condition
+        while(run)
         {
             //!< Fetch new ADC data
             if(actAdc->pStart > actAdc->pMid){
@@ -230,24 +272,83 @@ uint32_t ADC_display(struct adc_s *actAdc)
             else{
                 while(actAdc->io->DRam[0] > actAdc->half) nanosleep(&mSec, NULL);
             }
-            memcpy(&ADC_buffer[(secInd * ACQ_RATE_HZ)], actAdc->pStart, ACQ_RATE_HZ*2); //!< Since copy is made once per second, uses acquisition rate
 
-            //!< Very rudimentary display of 4 last second of ADC acquisition
-            printf("\r");
-            for(i = 0; i < BUFFER_SIZE/100; i++)//!< Replace hardcoded value
-            {
-                dispInd = (i * 100);
-                dispInd = (dispInd + (((secInd+1) % SEC_IN_BUF) * ACQ_RATE_HZ)) % BUFFER_SIZE;
-                printf("%4.0f|",ADC_buffer[dispInd]/ADC_TO_MV); //!< adjust index to move the display as new data comes in
+            //!< Since copy is made once per second, uses acquisition rate * 2 (1000 * 2 bytes)
+            if(!pthread_mutex_lock(&actAdc->bufMtx)){
+                memcpy(&ADC_buffer[(secInd * ACQ_RATE_HZ)], actAdc->pStart, ACQ_RATE_HZ*2);
+                pthread_mutex_unlock(&actAdc->bufMtx);
             }
-            fflush(stdout);
+            
+            sem_post(&actAdc->adcSem);
             swap(&actAdc->pStart,&actAdc->pMid);
             secInd = (secInd+1) % SEC_IN_BUF;
-            j++;
+
+            //!< Check for stop condition on every end of loop
+            if(!pthread_mutex_trylock(&actAdc->stpMtx)){
+                if(actAdc->adcStp == 1){
+                    run = 0;
+                }
+                pthread_mutex_unlock(&actAdc->stpMtx);
+            }         
         }
     }
-    else
+    else{
+        printf("Thread currently doesn't support multy channel and will not start\n");
+        return EXIT_FAILURE;
+    }
+    
+    
+
+    return EXIT_SUCCESS;
+}
+
+//! ADC_display: displays the last x seconds of ADC acquisition for a single channel
+/*!
+  Brief: 
+    This function is used to display the ADC acquisition while it is running in
+    RB mode (round buffer). Currently only supports a single step acquisition
+  param io:  struct adc_s *,    pre-initialized ADC struct holding pruio driver
+  param 
+  return: uint32_t, error code
+*/
+uint32_t ADC_display(struct adc_s *actAdc, uint32_t dispRate)
+{
+    //!< This function retrieves the latest x samples from
+    //!< the ADC driver and stores and displays them in
+    //!< a target rate of 10 updates for seconds.
+    uint32_t secInd = 0;
+    int32_t dispInd = 0;
+    uint32_t i,j;
+    uint32_t k = 0;
+    struct timespec delay;
+    delay.tv_nsec = NANO_IN_SEC / (1.1 * dispRate); //!< make the delay time slightly shorter than a second to make sure display is done before next buffer
+
+    printf("Starting dislay:\n");
+    if(actAdc->aChan == 1)//!< Currently only supports single channel
     {
+        while(k < 10)//!< Stops after 10 seconds TODO: Add proper stop condition
+        {
+            sem_wait(&actAdc->adcSem);
+            //!< Very rudimentary display of 4 last second of ADC acquisition
+            for(j = 0; j < dispRate; j++)
+            {
+            	printf("\r");
+                nanosleep(&delay, NULL);
+                for(i = 0; i < BUFFER_SIZE/100; i++)//!< Replace hardcoded value
+                {
+                    dispInd = ((i+j) * 100);
+                    dispInd = (dispInd + (((secInd+1) % SEC_IN_BUF) * ACQ_RATE_HZ)) % BUFFER_SIZE;
+                    printf("%%4.0f|",ADC_buffer[dispInd]/ADC_TO_MV); //!< adjust index to move the display as new data comes in
+                }
+		            fflush(stdout);
+            }
+
+            swap(&actAdc->pStart,&actAdc->pMid);
+            secInd = (secInd+1) % SEC_IN_BUF;
+            k++;
+        }
+    }
+    else{
         return EXIT_FAILURE;
     }
     
