@@ -39,7 +39,8 @@
 #define MS_IN_SEC   1000        //!< Number of milliseconds in a second
 #define BUFFER_SIZE (SEC_IN_BUF * ACQ_RATE_HZ * PROBE_NB)
 #define ADC_TO_MV   2.275       //!< Convertion factor to go from adc (16bits) to ref voltage (1800mV)
-#define LATENCY_TARGET 100      //!< Target time between ADC acquisition and accessibility of data
+#define LATENCY_TARGET  50      //!< Target time between ADC acquisition and accessibility of data
+#define MAX_ON_SCREEN   40      //!< The maximum number of values on a single line on screen (in our display format)
 
 /////////////////////////////////////////////////
 /// ... Stub ...
@@ -196,8 +197,8 @@ uint32_t ADC_init(struct adc_s *actAdc, uint32_t chanNum, uint32_t latency)
         }
     }
     
-    actAdc->half = ((actAdc->io->ESize >> 2) / actAdc->aChan) * actAdc->aChan; //!< The maximum index of the half ring buffer.
-    actAdc->samp = (actAdc->half << 1) / actAdc->aChan; //!< The number of samples in buffer.
+    actAdc->half = ((actAdc->io->ESize / 4) / actAdc->aChan) * actAdc->aChan; //!< The maximum index of the half ring buffer.
+    actAdc->samp = (actAdc->half * 2) / actAdc->aChan; //!< The number of samples in buffer.
 
     /////////////////////////////////////////////////
     /// ... Driver config ...
@@ -208,7 +209,7 @@ uint32_t ADC_init(struct adc_s *actAdc, uint32_t chanNum, uint32_t latency)
     }
     if (actAdc->half > actAdc->tInd){ 
         actAdc->half = actAdc->tInd; //!< Adapt size of the half to the buffer size
-        actAdc->samp = (actAdc->half << 1) / actAdc->aChan;  
+        actAdc->samp = (actAdc->half * 2) / actAdc->aChan;  
     }
     else{
         printf("Number of sample exceeds half of buffer size, time to increase Eram size!\n");
@@ -226,7 +227,7 @@ uint32_t ADC_init(struct adc_s *actAdc, uint32_t chanNum, uint32_t latency)
     }
     actAdc->pStart = actAdc->io->Adc->Value;            //!< Pointer to the start of the ring buffer.
     actAdc->pTrack = actAdc->pStart;                    //!< Pointer to track position in ring buffer.
-    actAdc->pEnd = actAdc->pStart + (actAdc->half << 1);//!< Pointer to the end of the ring buffer.
+    actAdc->pEnd = actAdc->pStart + (actAdc->half * 2);//!< Pointer to the end of the ring buffer.
     return EXIT_SUCCESS;
 }
 
@@ -316,7 +317,7 @@ uint32_t ADC_acquisition(void *arg)
 
             actAdc->pTrack = actAdc->pTarget;
             ackInd = (ackInd+actAdc->res) % actAdc->samp;
-	    bufInd = (bufInd+actAdc->res) % BUFFER_SIZE;
+	        bufInd = (bufInd+actAdc->res) % BUFFER_SIZE;
 	    
 	        //!< Check for stop condition on every end of loop
             if(!pthread_mutex_trylock(&actAdc->stpMtx)){
@@ -326,7 +327,7 @@ uint32_t ADC_acquisition(void *arg)
                 pthread_mutex_unlock(&actAdc->stpMtx);
             }	    
             //printf("%d",actAdc->io->DRam[0]); //!< NOTE: left as means of sanity check, remove when necessary
-	    sem_post(&actAdc->adcSemEnd);
+	        sem_post(&actAdc->adcSemEnd);
         }
     }
     else{
@@ -356,6 +357,7 @@ uint32_t ADC_display(struct adc_s *actAdc)
     int32_t dispInd = 0;
     uint32_t i;
     uint32_t k = 0;
+    double displayRatio = BUFFER_SIZE/actAdc->res / MAX_ON_SCREEN; //!< time resolution compared to on screen display capability 
 
     printf("Starting dislay:\n");
     if(actAdc->aChan == 1)//!< Currently only supports single channel
@@ -366,9 +368,9 @@ uint32_t ADC_display(struct adc_s *actAdc)
             //!< Very rudimentary display of 4 last second of ADC acquisition
 
             printf("\r");
-            for(i = 1; i < BUFFER_SIZE/actAdc->res; i++)
+            for(i = 1; i < BUFFER_SIZE/actAdc->res / displayRatio; i++)
             {
-                dispInd = ((i) * actAdc->res); //!< TODO: Implement mean values instead of downsampling if fast enough
+                dispInd = ((i * displayRatio) * actAdc->res); //!< TODO: Implement mean values instead of downsampling if fast enough
                 dispInd = (dispInd + startInd) % BUFFER_SIZE;
                 if(!pthread_mutex_lock(&actAdc->bufMtx)){
 		            printf("%4.0f ",ADC_buffer[dispInd]/ADC_TO_MV); //!< adjust index to move the display as new data comes in
