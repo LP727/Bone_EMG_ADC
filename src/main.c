@@ -31,6 +31,7 @@
 
 //TODO: Add error codes in an enum and in function returns
 
+#define DUMP_BUFFER 0
 #define PROBE_NB    1           //!< The number of active steps (must match setStep calls and mask).
 #define ACQ_RATE_HZ 1000        //!< ADC acquisition rate in Hz
 #define SEC_IN_BUF  4           //!< Number of seconds of acquisition in buffer
@@ -113,7 +114,7 @@ void ADC_destroy(struct adc_s *actAdc);
 //static void swap(uint16_t **p0, uint16_t **p1);
 static uint32_t ADC_acquisition(void *arg);
 static void display_channel(struct adc_s *actAdc, uint32_t chan, uint32_t startIndex);
-
+static void display_buffer();
 
 uint16_t ADC_buffer[BUFFER_SIZE] = {0};//!< Future public buffer, will need semaphore or mutex to monitor access
 static struct adc_s aAdc; //!< Move buffer in there eventually
@@ -158,10 +159,10 @@ uint32_t ADC_init(struct adc_s *actAdc, uint32_t chanNum, uint32_t latency)
     /////////////////////////////////////////////////
     //!< Currently going for a 1hHz acquisition, with 8 seconds of data in buffer
     actAdc->aChan = chanNum;
-    actAdc->sRate = ACQ_RATE_HZ * actAdc->aChan;    //!< The number of samples per seconds
+    actAdc->sRate = ACQ_RATE_HZ;    //!< The number of samples per seconds
     actAdc->sTime = NANO_IN_SEC / actAdc->sRate;   //!< A sample time in ns (1000000 -> 1 kHz).
     actAdc->lat = latency;
-    actAdc->res = (actAdc->sTime * actAdc->lat * actAdc->aChan) / NANO_IN_MS;
+    actAdc->res = (actAdc->lat * NANO_IN_MS * actAdc->aChan)/actAdc->sTime;
     //!< To keep in mind: Default maximum memory of the Eram is 256 kByte attributed by kernel and each sample is 2Bytes
     //!< Keep in mind augmenting the number of Probes will augment memory usage
                   //!< Number of active ADC channels
@@ -267,6 +268,7 @@ uint32_t ADC_acquisition_stop(struct adc_s *actAdc)
     else{
         actAdc->adcStp = 1;
         pthread_mutex_unlock(&actAdc->stpMtx);
+        sem_post(&actAdc->adcSemBeg);
     }
     
     return EXIT_SUCCESS;
@@ -290,10 +292,18 @@ uint32_t ADC_display(struct adc_s *actAdc)
     uint32_t startInd = 0;
     uint32_t i;
     uint32_t k = 0;
-
+  
+    if(DUMP_BUFFER)
+    {
+        display_buffer();
+	return EXIT_SUCCESS;
+    }
     printf("Starting dislay:\n");
-
-    while(k < 10 * (MS_IN_SEC/actAdc->res))//!< Stops after 10 seconds TODO: Add proper stop condition
+    for(i = 0; i < actAdc->aChan; i++)
+    {
+        printf("\n");
+    }
+    while(k < 10 * (MS_IN_SEC/actAdc->lat))//!< Stops after 10 seconds TODO: Add proper stop condition
     {
         sem_wait(&actAdc->adcSemEnd);
         for(i = 0; i < actAdc->aChan; i++)
@@ -365,7 +375,7 @@ static uint32_t ADC_acquisition(void *arg)
             pthread_mutex_unlock(&actAdc->bufMtx);
         }
         actAdc->pTrack = actAdc->pTarget;
-        ackInd = (ackInd+actAdc->res) % actAdc->samp;
+        ackInd = (ackInd+actAdc->res) % (actAdc->half*2);
 	    bufInd = (bufInd+actAdc->res) % BUFFER_SIZE;
 	
 	    //!< Check for stop condition on every end of loop
@@ -387,20 +397,39 @@ static void display_channel(struct adc_s *actAdc, uint32_t chan, uint32_t startI
     int32_t dispInd = 0;
     uint32_t i;
     double displayRatio = BUFFER_SIZE/actAdc->res / MAX_ON_SCREEN; //!< time resolution compared to on screen display capability 
-
-    for(i = actAdc->aChan; i > chan+1; i--)
+    
+    if(chan == 0)
     {
-        printf("\033[F");
+        for(i = chan; i < actAdc->aChan; i++)
+        {
+            printf("\033[F");
+        }
     }
-    printf("\r");
-    for(i = 1; i < BUFFER_SIZE/actAdc->res / displayRatio; i++)
+    printf("%d|",chan);
+    for(i = 1; i < MAX_ON_SCREEN; i++)
     {
-        dispInd = (((i+chan) * displayRatio) * actAdc->res); //!< TODO: Implement mean values instead of downsampling if fast enough
-        dispInd = (dispInd + startIndex) % BUFFER_SIZE;
+        dispInd = i * actAdc->res * displayRatio; //!< TODO: Implement mean values instead of downsampling if fast enough
+        dispInd = ((dispInd + startIndex + chan) % BUFFER_SIZE);
         if(!pthread_mutex_lock(&actAdc->bufMtx)){
-	        printf("%4.0f ",ADC_buffer[dispInd]/ADC_TO_MV); //!< adjust index to move the display as new data comes in
+            printf("%4.0f:",ADC_buffer[dispInd]/ADC_TO_MV); //!< adjust index to move the display as new data comes in
             pthread_mutex_unlock(&actAdc->bufMtx);
         }
     }
+    printf("\n");
     fflush(stdout);
+}
+
+static void display_buffer()
+{
+    int i;
+    printf("Buffer content starts below:\n");
+    for(i = 0; i< BUFFER_SIZE; i++)
+    {
+        if(!(i%PROBE_NB))
+	{
+        printf("\n%d:",(i/2)+1);
+	}
+        printf("%d;", ADC_buffer[i]);
+    }
+    printf("\n");
 }
