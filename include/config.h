@@ -1,3 +1,13 @@
+ /*********************************************************************************************************
+ *
+ * Filename    : config.h
+ * Author      : Louis-Philip Beliveau
+ * Description : This file holds all the configuration to define the parameters of operation for the ADC, 
+ *               PWM, display and EMG acquisition. Setting LOCAL_COMP 0  allows to compile the program on
+ *               a computer that isn't the BBGW.
+ *
+ *********************************************************************************************************/
+
 #ifndef CONFIG_H_
 #define CONFIG_H_
 

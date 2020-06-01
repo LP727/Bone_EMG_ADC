@@ -1,6 +1,6 @@
  /*********************************************************************************************************
  *
- * Filename    : Main.c
+ * Filename    : main.c
  * Author      : Louis-Philip Beliveau
  * Description : This program runs an ADC aquisition of EMG signals and extracts finger movements from them
  *               It runs on a beaglebone green wireless (BBGW) and uses the libpruio from : 
@@ -8,9 +8,6 @@
  *               It should be compiled on the BBGW or a computer with the appropriate libraries setup on it
  *
  *********************************************************************************************************/
-/////////////////////////////////////////////////
-/// ... DEBUG define ...
-/////////////////////////////////////////////////
 
 #include "ADC.h"
 

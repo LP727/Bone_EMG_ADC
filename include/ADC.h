@@ -1,3 +1,13 @@
+ /*********************************************************************************************************
+ *
+ * Filename    : ADC.h
+ * Author      : Louis-Philip Beliveau
+ * Description : This file holds all functions to define the ADC behavior given user defined parameters.
+ *               It supports acquisition of ADC and a rudimentary display of the acquisition. Most of the
+ *               operation parameters are defined in config.h. This .h file holds type definition for the 
+ *               operation mode enum and the ADC_s struct.
+ *
+ *********************************************************************************************************/
 #ifndef ADC_H_
 #define ADC_H_
 

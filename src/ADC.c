@@ -1,3 +1,13 @@
+ /*********************************************************************************************************
+ *
+ * Filename    : ADC.c
+ * Author      : Louis-Philip Beliveau
+ * Description : This file holds all functions to define the ADC behavior given user defined parameters.
+ *               It supports acquisition of ADC and a rudimentary display of the acquisition. Most of the
+ *               operation parameters are defined in config.h.
+ *
+ *********************************************************************************************************/
+
 #include <time.h>
 #include <string.h>
 #include "ADC.h"
@@ -14,7 +24,6 @@ uint32_t pruio_destroy(pruIo *foo){return EXIT_SUCCESS;}
 #endif
 
 //!< Local functions
-//static void swap(uint16_t **p0, uint16_t **p1);
 static void ADC_acquisition(void *arg);
 static void display_channel(struct adc_s *actAdc, uint32_t chan, uint32_t startIndex);
 static void display_buffer();
@@ -25,14 +34,17 @@ uint16_t ADC_buffer[BUFFER_SIZE] = {0};//!< Future public buffer, will need sema
 //! ADC_init: Initilization of ADC driver
 /*!
   Brief: 
-    This function initializes the ADC driver to work at (currently hardcoded) a
-    sampling rate of 1kHz, storing the values in a ring buffer holding the last
-    (currently hardcoded) 2 seconds of data. The number of ADC channels and the
+    This function initializes the ADC driver to work at a sampling rate of 1kHz,
+    (defined in config.h) storing the values in a ring buffer holding the last
+    x seconds of data (defined in config.h). The number of ADC channels and the
     rate at which the ADC will be refreshed in the program buffer is specified 
     in parameters.
+
   param actAdc:     struct adc_s *,    ADC struct holding pruio driver
-  param chanNum:    uint32_t,   number of ADC probes that 
-  param latency:    uint32_t,   time before a reading will be accessible
+  param chanNum:    uint32_t,   number of ADC probes to acquire readings for 
+  param latency:    uint32_t,   time (ms) before a reading will be accessible
+  param mode:       synchmode_e, determines what will the acquisition be synched with
+
   return: uint32_t, error code
 */
 uint32_t ADC_init(struct adc_s *actAdc, uint32_t chanNum, uint32_t latency, synch_mode_e mode)
@@ -137,6 +149,16 @@ uint32_t ADC_init(struct adc_s *actAdc, uint32_t chanNum, uint32_t latency, sync
     return EXIT_SUCCESS;
 }
 
+//! ADC_acquisition_start: Starts ADC acquisition and storage thread
+/*!
+  Brief: 
+    This function initializes the mutexes to protect the ADC buffer and the 
+    acquisition stop signal. It then starts the ADC acquisition thread.
+
+  param actAdc:     struct adc_s *,    pre-initialized ADC struct 
+
+  return: uint32_t, error code
+*/
 uint32_t ADC_acquisition_start(struct adc_s *actAdc)
 {
     int iRet;
@@ -159,6 +181,16 @@ uint32_t ADC_acquisition_start(struct adc_s *actAdc)
     return EXIT_SUCCESS;
 }
 
+//! ADC_acquisition_stop: Stops ADC acquisition and storage thread
+/*!
+  Brief: 
+    This function sends the signal to stop the Acquisition thread of the ADC
+    driver. It then waits for the thread to end before returning.
+
+  param actAdc: struct adc_s *, pre-initialized ADC struct with running acquisition thread
+
+  return: uint32_t, error code
+*/
 uint32_t ADC_acquisition_stop(struct adc_s *actAdc)
 {
     int iRet;
@@ -193,13 +225,14 @@ uint32_t ADC_acquisition_stop(struct adc_s *actAdc)
     return EXIT_SUCCESS;
 }
 
-//! ADC_display: displays the last x seconds of ADC acquisition for a single channel
+//! ADC_display: displays the last x seconds of ADC acquisition for running channels
 /*!
   Brief: 
     This function is used to display the ADC acquisition while it is running in
-    RB mode (round buffer). Currently only supports a single step acquisition
-  param io:  struct adc_s *,    pre-initialized ADC struct holding pruio driver
-  param dispRate: uint32_t, dependent
+    RB mode (round buffer). It displays all active channels of the ADC on screen
+    in a downsampled manner to fit the screen.
+
+  param io: struct adc_s *, pre-initialized ADC struct with running acquisition thread
 
   return: uint32_t, error code
 */
@@ -239,6 +272,17 @@ uint32_t ADC_display(struct adc_s *actAdc)
     return EXIT_SUCCESS;
 }
 
+//! ADC_destroy: destroys ADC driver and synch and protection variables
+/*!
+  Brief: 
+    This function destroys initialized sempahore and protuction mutexes of an
+    ADC struct, then destroys the pruio driver. Must be called after ADC_stop,
+    otherwised undefined behaviour will occur.
+    
+  param io: struct adc_s *, pre-initialized ADC struct with stopped acquisition thread
+
+  return: none
+*/
 void ADC_destroy(struct adc_s *actAdc)
 {
     //!< Destroys initialized semaphores
@@ -266,14 +310,6 @@ void ADC_destroy(struct adc_s *actAdc)
     pruio_destroy(actAdc->io); //!< Destroys driver before exit
 }
 
-// TODO: completely remove if pointer swap juged unnecessary
-//static void swap(uint16_t **p0, uint16_t **p1)
-//{
-//    uint16_t *swap = *p0;
-//    *p0 = *p1;
-//    *p1 = swap;
-//}
-
 //! ADC_acquisition: stores ADC acquisition in the ADC buffer
 /*!
   Brief: 
@@ -283,7 +319,7 @@ void ADC_destroy(struct adc_s *actAdc)
     for this to work properly. The loop posts a semaphore at a rate defined at
     initialization. 
 
-  param arg:    void *, pre-initialized ADC struct holding pruio driver
+  param arg:    (void *) struct adc_s *, pre-initialized ADC struct holding pruio driver
 
   return: none
 */
@@ -350,6 +386,21 @@ static void ADC_acquisition(void *arg)
     pthread_exit(NULL);
 }
 
+//! display_channel: Displays the ADC buffer content for a given ADC channel
+/*!
+  Brief: 
+    This function displays all the buffer values of an ADC channel, downsampled
+    to fit the defined maximum values on screen (defined in config.h). The most
+    recent values appear on the right of the screen and the oldest on the left.
+    It displays the channel number on the left before the |. 
+    
+  param io: struct adc_s *, pre-initialized ADC struct with started acquisition thread
+  param chan: uint32_t, the channel to display
+  paramt startIndex: the index where to start the display from in order to ensure that
+                        the latest values appears on the right of the screen
+
+  return: none
+*/
 static void display_channel(struct adc_s *actAdc, uint32_t chan, uint32_t startIndex)
 {
     int32_t dispInd = 0;
@@ -363,7 +414,7 @@ static void display_channel(struct adc_s *actAdc, uint32_t chan, uint32_t startI
             printf("\033[F");
         }
     }
-    printf("%d|",chan);
+    printf("%d|",chan+1);
     for(i = 1; i < MAX_ON_SCREEN; i++)
     {
         dispInd = i * actAdc->res * displayRatio; //!< TODO: Implement mean values instead of downsampling if fast enough
@@ -377,6 +428,16 @@ static void display_channel(struct adc_s *actAdc, uint32_t chan, uint32_t startI
     fflush(stdout);
 }
 
+//! display_buffer: Displays all the content of the ADC buffer
+/*!
+  Brief: 
+    This function displays all the values in buffer. Spreads by acquisition.
+    Each display line holds one acquisition for all the channels.
+    
+    param: none
+
+  return: none
+*/
 static void display_buffer()
 {
     int i;
@@ -385,7 +446,7 @@ static void display_buffer()
     {
         if(!(i%PROBE_NB))
 	{
-        printf("\n%d:",(i/2)+1);
+        printf("\n%d:",(i/PROBE_NB)+1);
 	}
         printf("%d;", ADC_buffer[i]);
     }
