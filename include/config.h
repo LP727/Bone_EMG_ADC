@@ -27,7 +27,7 @@
 #define BUFFER_SIZE (SEC_IN_BUF * ACQ_RATE_HZ * PROBE_NB)
 #define ADC_TO_MV   2.275       //!< Convertion factor to go from adc (16bits) to ref voltage (1800mV)
 #define LATENCY_TARGET  50      //!< Target time between ADC acquisition and accessibility of data
-#define MAX_ON_SCREEN   40      //!< The maximum number of values on a single line on screen (in our display format)
+#define MAX_ON_SCREEN   30      //!< The maximum number of values on a single line on screen (in our display format)
 
 /////////////////////////////////////////////////
 /// ... PWM CONFIG ...

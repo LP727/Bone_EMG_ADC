@@ -232,7 +232,7 @@ uint32_t ADC_acquisition_stop(struct adc_s *actAdc)
     RB mode (round buffer). It displays all active channels of the ADC on screen
     in a downsampled manner to fit the screen.
 
-  param io: struct adc_s *, pre-initialized ADC struct with running acquisition thread
+  param actAdc: struct adc_s *, pre-initialized ADC struct with running acquisition thread
 
   return: uint32_t, error code
 */
@@ -279,7 +279,7 @@ uint32_t ADC_display(struct adc_s *actAdc)
     ADC struct, then destroys the pruio driver. Must be called after ADC_stop,
     otherwised undefined behaviour will occur.
     
-  param io: struct adc_s *, pre-initialized ADC struct with stopped acquisition thread
+  param actAdc: struct adc_s *, pre-initialized ADC struct with stopped acquisition thread
 
   return: none
 */

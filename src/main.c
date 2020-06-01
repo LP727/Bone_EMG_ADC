@@ -9,12 +9,13 @@
  *
  *********************************************************************************************************/
 
-#include "ADC.h"
-
-struct adc_s aAdc; //!< Move buffer in there eventually
+#include "EMG.h"
 
 int main(int argc, char **argv)
 {
+    struct emg_s aEmg;
+    struct adc_s aAdc; //!< Move buffer in there eventually
+
     if(ADC_init(&aAdc, PROBE_NB, LATENCY_TARGET, DISPLAY)){
         printf("ADC init failed\n");
         return EXIT_FAILURE;
@@ -22,7 +23,7 @@ int main(int argc, char **argv)
 
     ADC_acquisition_start(&aAdc);
 
-    ADC_display(&aAdc);
+    EMG_decode_movement(&aEmg, &aAdc, NULL); //!< Currently PWM is not implemented
 
     ADC_acquisition_stop(&aAdc);
 
