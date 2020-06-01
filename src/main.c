@@ -18,7 +18,7 @@ struct adc_s aAdc; //!< Move buffer in there eventually
 
 int main(int argc, char **argv)
 {
-    if(ADC_init(&aAdc, PROBE_NB, LATENCY_TARGET)){
+    if(ADC_init(&aAdc, PROBE_NB, LATENCY_TARGET, DISPLAY)){
         printf("ADC init failed\n");
         return EXIT_FAILURE;
     }

@@ -15,7 +15,7 @@ uint32_t pruio_destroy(pruIo *foo){return EXIT_SUCCESS;}
 
 //!< Local functions
 //static void swap(uint16_t **p0, uint16_t **p1);
-static uint32_t ADC_acquisition(void *arg);
+static void ADC_acquisition(void *arg);
 static void display_channel(struct adc_s *actAdc, uint32_t chan, uint32_t startIndex);
 static void display_buffer();
 
@@ -35,7 +35,7 @@ uint16_t ADC_buffer[BUFFER_SIZE] = {0};//!< Future public buffer, will need sema
   param latency:    uint32_t,   time before a reading will be accessible
   return: uint32_t, error code
 */
-uint32_t ADC_init(struct adc_s *actAdc, uint32_t chanNum, uint32_t latency)
+uint32_t ADC_init(struct adc_s *actAdc, uint32_t chanNum, uint32_t latency, synch_mode_e mode)
 {
     uint32_t i;
 
@@ -53,13 +53,31 @@ uint32_t ADC_init(struct adc_s *actAdc, uint32_t chanNum, uint32_t latency)
                   //!< Number of active ADC channels
     actAdc->mask = 0;
     actAdc->tInd = actAdc->sRate * actAdc->aChan;     //!< The maximum total index per second.
+    actAdc->sMode = mode;
 
     /////////////////////////////////////////////////
     /// ... Initialization ...
     /////////////////////////////////////////////////
     actAdc->adcStp = 0;
-    sem_init(&actAdc->adcSemBeg, 0, 1);
-    sem_init(&actAdc->adcSemEnd, 0, 0);
+
+    switch (actAdc->sMode)
+    {
+        case FREE:
+        break;
+
+        case DISPLAY:
+            sem_init(&actAdc->adcDispSem, 0, 1);
+        break;
+
+        case EXTERNAL:
+            sem_init(&actAdc->adcExtSem, 0, 1);
+        break;
+
+        default:
+        break;
+    }
+    
+    sem_init(&actAdc->acdAckSem, 0, 0);
     actAdc->io = pruio_new(PRUIO_DEF_ACTIVE, 0, 0, 0); //!< create new driver
     if (actAdc->io->Errr){
                printf("Failed creating io with error: (%s)\n", actAdc->io->Errr);
@@ -153,7 +171,23 @@ uint32_t ADC_acquisition_stop(struct adc_s *actAdc)
     else{
         actAdc->adcStp = 1;
         pthread_mutex_unlock(&actAdc->stpMtx);
-        sem_post(&actAdc->adcSemBeg);
+        switch (actAdc->sMode)
+        {
+        case FREE:
+        break;
+
+        case DISPLAY:
+            sem_post(&actAdc->adcDispSem);
+        break;
+
+        case EXTERNAL:
+            sem_post(&actAdc->adcExtSem);
+        break;
+
+        default:
+        break;
+        }
+        pthread_join(actAdc->adcThread, NULL);
     }
     
     return EXIT_SUCCESS;
@@ -190,7 +224,7 @@ uint32_t ADC_display(struct adc_s *actAdc)
     }
     while(k < 10 * (MS_IN_SEC/actAdc->lat))//!< Stops after 10 seconds TODO: Add proper stop condition
     {
-        sem_wait(&actAdc->adcSemEnd);
+        sem_wait(&actAdc->acdAckSem);
         for(i = 0; i < actAdc->aChan; i++)
         {
             display_channel(actAdc, i, startInd);
@@ -198,7 +232,7 @@ uint32_t ADC_display(struct adc_s *actAdc)
         
         startInd = (startInd+actAdc->res) % BUFFER_SIZE;
         k++;
-	    sem_post(&actAdc->adcSemBeg);
+	    sem_post(&actAdc->adcDispSem);
     }
     
     printf("\n");
@@ -207,6 +241,28 @@ uint32_t ADC_display(struct adc_s *actAdc)
 
 void ADC_destroy(struct adc_s *actAdc)
 {
+    //!< Destroys initialized semaphores
+    switch (actAdc->sMode)
+    {
+        case FREE:
+        break;
+
+        case DISPLAY:
+            sem_destroy(&actAdc->adcDispSem);
+        break;
+
+        case EXTERNAL:
+            sem_destroy(&actAdc->adcExtSem);
+        break;
+
+        default:
+        break;
+    }
+    
+    //!< Destroys mutexes
+    pthread_mutex_destroy(&actAdc->stpMtx);
+    pthread_mutex_destroy(&actAdc->bufMtx);
+
     pruio_destroy(actAdc->io); //!< Destroys driver before exit
 }
 
@@ -229,9 +285,9 @@ void ADC_destroy(struct adc_s *actAdc)
 
   param arg:    void *, pre-initialized ADC struct holding pruio driver
 
-  return: uint32_t, error code
+  return: none
 */
-static uint32_t ADC_acquisition(void *arg)
+static void ADC_acquisition(void *arg)
 {
     uint32_t ackInd = 0;
     uint32_t bufInd = 0;
@@ -242,7 +298,24 @@ static uint32_t ADC_acquisition(void *arg)
 
     while(run)
     {
-        sem_wait(&actAdc->adcSemBeg);
+        switch (actAdc->sMode)
+        {
+        case FREE:
+        break;
+
+        case DISPLAY:
+            sem_wait(&actAdc->adcDispSem);
+        break;
+
+        case EXTERNAL:
+            sem_wait(&actAdc->adcExtSem);
+        break;
+
+        default:
+        break;
+        }
+
+        
         actAdc->pTarget = actAdc->pTrack + actAdc->res;//!< increment of pointer
         if(actAdc->pTarget >= actAdc->pEnd)
         {
@@ -271,10 +344,10 @@ static uint32_t ADC_acquisition(void *arg)
             pthread_mutex_unlock(&actAdc->stpMtx);
         }	    
         //printf("%d",actAdc->io->DRam[0]); //!< NOTE: left as means of sanity check, remove when necessary
-	    sem_post(&actAdc->adcSemEnd);
+	    sem_post(&actAdc->acdAckSem);
     }
 
-    return EXIT_SUCCESS;
+    pthread_exit(NULL);
 }
 
 static void display_channel(struct adc_s *actAdc, uint32_t chan, uint32_t startIndex)

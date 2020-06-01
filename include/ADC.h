@@ -37,6 +37,12 @@ typedef struct pruIos
 
 #endif
 
+typedef enum {
+    FREE,       //!< ADC acquisition will run freely with synchronizing  
+    DISPLAY,    //!< ADC acquisition will synchronize itself with the display
+    EXTERNAL    //!< ADC acquisition will be syncrhonized with a semaphore defined in another file
+} synch_mode_e;
+
 struct adc_s
 {
     // **** Driver **** //
@@ -52,28 +58,29 @@ struct adc_s
     uint32_t samp;      //!< The number of samples in the ring buffer
     uint32_t lat;       //!< The target latency (ms) between acquisition and storage
     uint32_t res;       //!< The number of sample per unit of latency time
+    synch_mode_e sMode; //!< Defines what your acquisition will synch on
 
     // **** Ring buffer pointer **** //
     uint16_t *pStart;   //!< Pointer to the start of the ring buffer.
     uint16_t *pTrack;   //!< Pointer to track position the ring buffer.
     uint16_t *pTarget;  //!< Pointer to define next increment of pTrack.
-    uint16_t *pMid;     //!< Pointer to the middle of the ring buffer.
     uint16_t *pEnd;     //!< Pointer to the end of the ring buffer.
 
     // **** Thread and sync **** //
     pthread_t adcThread;    //!< ADC background thread
     pthread_mutex_t bufMtx; //!< mutex for buffer access
     pthread_mutex_t stpMtx; //!< mutex for stop of adcThread
-    sem_t adcSemBeg;        //!< semaphore to syncrhonise end of acquisition with display
-    sem_t adcSemEnd;        //!< semaphore to syncrhonise end of acquisition with display
-    uint32_t adcStp;        //!< value to send stop signal 
+    sem_t adcDispSem;        //!< semaphore to syncrhonise end of acquisition with display
+    sem_t acdAckSem;        //!< semaphore to syncrhonise end of acquisition with display
+    sem_t adcExtSem;
+    uint32_t adcStp;        //!< value to send stop signal
 };
 
 //!< Public buffer
-extern uint16_t ADC_buffer[BUFFER_SIZE];//!< Future public buffer, will need semaphore or mutex to monitor access
+extern uint16_t ADC_buffer[BUFFER_SIZE]; //!< Public buffer, needs mutex synchronization to access
 
 //!< Public functions
-uint32_t ADC_init(struct adc_s *actAdc, uint32_t chanNum, uint32_t latency);
+uint32_t ADC_init(struct adc_s *actAdc, uint32_t chanNum, uint32_t latency, synch_mode_e mode);
 uint32_t ADC_acquisition_start(struct adc_s *actAdc);
 uint32_t ADC_acquisition_stop(struct adc_s *actAdc);
 uint32_t ADC_display(struct adc_s *actAdc);
