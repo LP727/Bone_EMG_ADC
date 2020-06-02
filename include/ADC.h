@@ -95,5 +95,6 @@ uint32_t ADC_acquisition_start(struct adc_s *actAdc);
 uint32_t ADC_acquisition_stop(struct adc_s *actAdc);
 uint32_t ADC_display(struct adc_s *actAdc);
 void ADC_destroy(struct adc_s *actAdc);
+uint32_t ADC_stop_check(struct adc_s *actAdc);
 
 #endif

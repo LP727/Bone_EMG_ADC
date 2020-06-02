@@ -31,6 +31,10 @@ static void display_buffer();
 
 uint16_t ADC_buffer[BUFFER_SIZE] = {0};//!< Future public buffer, will need semaphore or mutex to monitor access
 
+/////////////////////////////////////////////////
+/// ... PUBLIC FUNCTIONS ...
+/////////////////////////////////////////////////
+
 //! ADC_init: Initilization of ADC driver
 /*!
   Brief: 
@@ -252,12 +256,7 @@ uint32_t ADC_display(struct adc_s *actAdc)
         k++;
 
         //!< Check for stop condition on every end of loop
-        if(!pthread_mutex_trylock(&actAdc->stpMtx)){
-            if(actAdc->adcStp == 1){
-                run = 0;
-            }
-            pthread_mutex_unlock(&actAdc->stpMtx);
-        }
+        run = !ADC_stop_check(actAdc); 
         sem_post(&actAdc->adcDispSem);	 
     }
     
@@ -302,6 +301,35 @@ void ADC_destroy(struct adc_s *actAdc)
 
     pruio_destroy(actAdc->io); //!< Destroys driver before exit
 }
+
+//! ADC_stop_check: Wrapper to check mutex protected adcStp variable
+/*!
+  Brief: 
+    This function trys to lock the stop mutex of an ADC struct. If successfull, 
+    it checks the value of the mutex, otherwise returns zero. This function is 
+    nonblocking.
+    
+  param actAdc: struct adc_s *, pre-initialized ADC struct
+
+  return: 1 if the mutex was locked and adcStp was true, 0 otherwise.
+*/
+uint32_t ADC_stop_check(struct adc_s *actAdc)
+{
+    uint32_t iRet = 0;
+    if(!pthread_mutex_trylock(&actAdc->stpMtx)){
+        if(actAdc->adcStp == 1){
+            iRet = 1;
+        }
+        pthread_mutex_unlock(&actAdc->stpMtx);
+    }   
+
+    return iRet;
+}
+
+
+/////////////////////////////////////////////////
+/// ... STATIC FUNCTIONS ...
+/////////////////////////////////////////////////
 
 //! ADC_acquisition: stores ADC acquisition in the ADC buffer
 /*!
@@ -366,12 +394,7 @@ static void ADC_acquisition(void *arg)
 	    bufInd = (bufInd+actAdc->res) % BUFFER_SIZE;
 	
 	    //!< Check for stop condition on every end of loop
-        if(!pthread_mutex_trylock(&actAdc->stpMtx)){
-            if(actAdc->adcStp == 1){
-                run = 0;
-            }
-            pthread_mutex_unlock(&actAdc->stpMtx);
-        }	    
+        run = !ADC_stop_check(actAdc);    
 	    sem_post(&actAdc->acdAckSem);
     }
 
