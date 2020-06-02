@@ -203,22 +203,6 @@ uint32_t ADC_acquisition_stop(struct adc_s *actAdc)
     else{
         actAdc->adcStp = 1;
         pthread_mutex_unlock(&actAdc->stpMtx);
-        switch (actAdc->sMode)
-        {
-        case FREE:
-        break;
-
-        case DISPLAY:
-            sem_post(&actAdc->adcDispSem);
-        break;
-
-        case EXTERNAL:
-            sem_post(&actAdc->adcExtSem);
-        break;
-
-        default:
-        break;
-        }
         pthread_join(actAdc->adcThread, NULL);
     }
     
@@ -244,6 +228,7 @@ uint32_t ADC_display(struct adc_s *actAdc)
     uint32_t startInd = 0;
     uint32_t i;
     uint32_t k = 0;
+    uint32_t run = 1;
   
     if(DUMP_BUFFER)
     {
@@ -255,7 +240,7 @@ uint32_t ADC_display(struct adc_s *actAdc)
     {
         printf("\n");
     }
-    while(k < 10 * (MS_IN_SEC/actAdc->lat))//!< Stops after 10 seconds TODO: Add proper stop condition
+    while(run)//!< Stops on the same signal as acquisition stops
     {
         sem_wait(&actAdc->acdAckSem);
         for(i = 0; i < actAdc->aChan; i++)
@@ -265,7 +250,15 @@ uint32_t ADC_display(struct adc_s *actAdc)
         
         startInd = (startInd+actAdc->res) % BUFFER_SIZE;
         k++;
-	    sem_post(&actAdc->adcDispSem);
+
+        //!< Check for stop condition on every end of loop
+        if(!pthread_mutex_trylock(&actAdc->stpMtx)){
+            if(actAdc->adcStp == 1){
+                run = 0;
+            }
+            pthread_mutex_unlock(&actAdc->stpMtx);
+        }
+        sem_post(&actAdc->adcDispSem);	 
     }
     
     printf("\n");
@@ -379,7 +372,6 @@ static void ADC_acquisition(void *arg)
             }
             pthread_mutex_unlock(&actAdc->stpMtx);
         }	    
-        //printf("%d",actAdc->io->DRam[0]); //!< NOTE: left as means of sanity check, remove when necessary
 	    sem_post(&actAdc->acdAckSem);
     }
 
