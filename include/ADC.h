@@ -48,9 +48,11 @@ typedef struct pruIos
 #endif
 
 typedef enum {
-    FREE,       //!< ADC acquisition will run freely with synchronizing  
-    DISPLAY,    //!< ADC acquisition will synchronize itself with the display
-    EXTERNAL    //!< ADC acquisition will be syncrhonized with a semaphore defined in another file
+    FREE,        //!< ADC acquisition will run freely with synchronizing  
+    DISPLAY,     //!< ADC acquisition will synchronize itself with the display
+    DISPLAY_LOG, //!< DISPLAY + streamed into a file (WARNING: NO SIZE CONTROL OF FULE IS DONE)
+    EXTERNAL,    //!< ADC acquisition will be syncrhonized with a semaphore defined in another file
+    EXTERNAL_LOG //!< EXTERNAL + streamed into a file (WARNING: NO SIZE CONTROL OF FULE IS DONE)
 } synch_mode_e;
 
 struct adc_s
@@ -80,10 +82,11 @@ struct adc_s
     pthread_t adcThread;    //!< ADC background thread
     pthread_mutex_t bufMtx; //!< mutex for buffer access
     pthread_mutex_t stpMtx; //!< mutex for stop of adcThread
-    sem_t adcDispSem;        //!< semaphore to syncrhonise end of acquisition with display
+    sem_t adcDispSem;       //!< semaphore to syncrhonise end of display with acquisition
     sem_t acdAckSem;        //!< semaphore to syncrhonise end of acquisition with display
-    sem_t adcExtSem;
+    sem_t adcExtSem;        //!< semaphore to synchronise end of external process with acquisition
     uint32_t adcStp;        //!< value to send stop signal
+
 };
 
 //!< Public buffer

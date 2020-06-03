@@ -30,6 +30,7 @@ static void display_buffer();
 
 
 uint16_t ADC_buffer[BUFFER_SIZE] = {0};//!< Future public buffer, will need semaphore or mutex to monitor access
+FILE *f;
 
 /////////////////////////////////////////////////
 /// ... PUBLIC FUNCTIONS ...
@@ -80,16 +81,29 @@ uint32_t ADC_init(struct adc_s *actAdc, uint32_t chanNum, uint32_t latency, sync
     {
         case FREE:
         break;
-
         case DISPLAY:
             sem_init(&actAdc->adcDispSem, 0, 1);
         break;
-
+        case DISPLAY_LOG:
+            sem_init(&actAdc->adcDispSem, 0, 1);
+            f = fopen("ADC_log.csv","w");
+            if(f == NULL)
+            {
+                printf("Opening ADC file!\n");   
+                exit(EXIT_FAILURE);             
+            }
+            break;
         case EXTERNAL:
             sem_init(&actAdc->adcExtSem, 0, 1);
         break;
-
-        default:
+        case EXTERNAL_LOG:
+            sem_init(&actAdc->adcExtSem, 0, 1);
+            f = fopen("ADC_log.csv","w");
+            if(f == NULL)
+            {
+                printf("Opening ADC file!\n");   
+                exit(EXIT_FAILURE);             
+            }
         break;
     }
     
@@ -282,16 +296,19 @@ void ADC_destroy(struct adc_s *actAdc)
     {
         case FREE:
         break;
-
         case DISPLAY:
             sem_destroy(&actAdc->adcDispSem);
         break;
-
+        case DISPLAY_LOG:
+            sem_destroy(&actAdc->adcDispSem);
+            fclose(f);
+        break;
         case EXTERNAL:
             sem_destroy(&actAdc->adcExtSem);
         break;
-
-        default:
+        case EXTERNAL_LOG:
+            sem_destroy(&actAdc->adcExtSem);
+            fclose(f);
         break;
     }
     
@@ -359,19 +376,19 @@ static void ADC_acquisition(void *arg)
         {
         case FREE:
         break;
-
         case DISPLAY:
             sem_wait(&actAdc->adcDispSem);
         break;
-
+        case DISPLAY_LOG:
+            sem_wait(&actAdc->adcDispSem);
+        break;
         case EXTERNAL:
             sem_wait(&actAdc->adcExtSem);
         break;
-
-        default:
+        case EXTERNAL_LOG:
+            sem_wait(&actAdc->adcExtSem);
         break;
         }
-
         
         actAdc->pTarget = actAdc->pTrack + actAdc->res;//!< increment of pointer
         if(actAdc->pTarget >= actAdc->pEnd)
@@ -392,7 +409,13 @@ static void ADC_acquisition(void *arg)
         actAdc->pTrack = actAdc->pTarget;
         ackInd = (ackInd+actAdc->res) % (actAdc->half*2);
 	    bufInd = (bufInd+actAdc->res) % BUFFER_SIZE;
-	
+
+        if((actAdc->sMode == DISPLAY_LOG) || (actAdc->sMode == EXTERNAL_LOG))
+        {
+            fwrite(&ADC_buffer[bufInd], sizeof(uint16_t), actAdc->res,f);
+            fprintf(f,"\n");
+        }
+
 	    //!< Check for stop condition on every end of loop
         run = !ADC_stop_check(actAdc);    
 	    sem_post(&actAdc->acdAckSem);
